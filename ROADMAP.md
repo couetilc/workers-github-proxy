@@ -46,6 +46,13 @@ Every design decision (GitHub-convention URL paths, auth that fits git basic aut
 
 **Granularity:** per-repo lanes, not per-ref, for v1 — pack fetches overlap heavily across refs and per-ref cursors complicate the model for marginal gain on agent-sized repos. Cross-repo needs no coordination; repos are independent, matching both DO sharding and Artifacts' repo-per-agent model.
 
+### Auth & transport notes
+
+- **HTTPS-only.** The proxy terminates TLS at the edge and works on the plaintext smart-HTTP exchange — the only architecture that supports buffering and replay. SSH remotes cannot be proxied (end-to-end encrypted; Workers can't terminate inbound SSH). Docs must state that the one-command swap requires an HTTPS remote.
+- **Agents: smooth.** Agents overwhelmingly authenticate with HTTPS tokens already; a proxy-minted token in the credential helper (or embedded in the swapped URL) fits their existing flow.
+- **Humans: known friction point.** SSH-remote users need a remote migration, and everyone needs a token issued and installed — which strains the one-command north star. **Open research item (pre-Phase 5):** investigate UX improvements, e.g. a tiny setup CLI — strawman: `npx git-cloud setup`, which authenticates, mints the token, and rewrites the remote in one step (preserving the one-command story for humans, just a different command than the raw sed swap agents use) — git credential-helper integration, OAuth device flow for token issuance, or GitHub App–based identity so users authorize once in a browser. Goal: human onboarding no worse than `gh auth login`.
+- **Trust posture:** proxy sees plaintext contents and credentials by necessity → self-host deployment ("your Worker, your account, your secrets") is the primary trust answer; client tokens verified per-request and never persisted; Cloudflare at-rest encryption covers Artifacts/R2. Client-side encryption (`git-remote-gcrypt`-style) passes through unmodified for users who want the proxy blind to contents.
+
 ---
 
 ## Phase 0 — Spike & validation (~1 week)
@@ -139,6 +146,7 @@ Goal: 100% coverage on core sync code, and confidence that the number isn't vacu
 2. **Artifacts webhooks:** if push-event subscriptions ship during development, they replace the "enqueue after proxied push" trigger — track the changelog.
 3. **Force-push semantics inbound:** does the proxy accept client force-pushes and mirror them, or restrict them? (Interacts with the divergence policy.)
 4. **Name & domain:** worth picking early since the URL *is* the product surface.
+5. **Human auth UX (research follow-up):** token issuance + SSH-remote migration is the friction point for human users. Evaluate setup-CLI, credential-helper, OAuth device flow, and GitHub App approaches (see Auth & transport notes) before Phase 5 docs are written.
 
 ## Risks
 
