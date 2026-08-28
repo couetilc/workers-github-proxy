@@ -27,6 +27,7 @@ Every design decision (GitHub-convention URL paths, auth that fits git basic aut
 | Sync orchestration | Cloudflare Queues (trigger + retry/DLQ) and/or Workflows (durable multi-step sync) |
 | Concurrency | One Durable Object per repo as control plane: linearizes sync state + admission via leases; data-plane writes to Artifacts/GitHub run concurrently under git's CAS ref semantics |
 | Sync state modeling | XState state machines for the sync lifecycle |
+| Read-path freshness | Background poll (default on, per-repo interval) reconciles out-of-band GitHub pushes into Artifacts; optional GitHub webhook supplements/replaces polling for lower latency; opt-in "proxy-exclusive mode" skips reconciliation entirely for repos that guarantee the proxy is the sole write path |
 | Test target | 100% coverage on core sync logic, enforced in CI, backed by mutation testing so the number is meaningful |
 
 ### Core syncing logic — Durable Object per repo
@@ -80,6 +81,21 @@ Goal: a usable single-tenant proxy for agent-sized repos.
 - [ ] Deploy under a real domain; write the "change one string in your remote URL" quickstart
 
 **Exit criteria:** an agent workflow (e.g., Claude Code or a scripted agent) uses the proxy as its only remote for a full session, with GitHub reflecting every push.
+
+## Phase 1.5 — Edge-accelerated reads (~1–2 weeks)
+
+Goal: serve `git clone`/`git fetch` from Artifacts at the edge (latency win, and a read path that keeps working during a GitHub outage) without ever silently serving a stale repo.
+
+Resolves Open Question #1 below.
+
+- [ ] **Read-path proxy:** `git-upload-pack` (`info/refs?service=git-upload-pack` + the fetch negotiation) served from Artifacts, completing the read side of the URL swap alongside the existing write path
+- [ ] **Background poll (default on):** per-repo DO polls GitHub's ref state on an interval, independent of push-triggered sync, to catch commits that landed on GitHub *outside* the proxy (direct push, merged PR, another tool) and pull them into Artifacts
+- [ ] **Optional GitHub webhook:** push-event webhook as a lower-latency alternative/supplement to polling — configured per repo (webhook URL + secret at setup time); falls back to the poll cadence if not configured or if delivery fails, so correctness never depends on webhook delivery succeeding
+- [ ] **Per-repo freshness toggle:** default = poll (+ webhook if configured); opt-in "proxy-exclusive mode" for repos that guarantee the proxy is the sole write path, skipping reconciliation entirely for the fastest possible reads
+- [ ] **Visible staleness, never silent staleness:** reads carry the reconciliation cursor's age; status endpoint (Phase 1) exposes reconciliation lag per repo
+- [ ] **Correctness test:** push directly to GitHub (bypassing the proxy), confirm the next clone through the proxy reflects it within the configured poll/webhook window — and never before
+
+**Exit criteria:** clone-through-proxy is measurably faster than clone-from-GitHub in edge-favorable geographies, and no clone/fetch ever omits a commit that landed on GitHub more than one reconciliation interval ago.
 
 ## Phase 2 — GitHub interaction mapping & failure semantics (~2 weeks)
 
@@ -142,8 +158,8 @@ Goal: 100% coverage on core sync code, and confidence that the number isn't vacu
 
 ## Open questions
 
-1. **Read path scope:** proxy `git-upload-pack` too (clones/fetches through the cute URL, served from Artifacts) — MVP or later? Serving reads from Artifacts during a GitHub outage is a strong part of the story.
-2. **Artifacts webhooks:** if push-event subscriptions ship during development, they replace the "enqueue after proxied push" trigger — track the changelog.
+1. ~~**Read path scope**~~ — resolved: see **Phase 1.5**. Reads are served from Artifacts with default-on poll + optional webhook reconciliation, not deferred to later.
+2. **Artifacts webhooks:** if push-event subscriptions ship during development, they replace the "enqueue after proxied push" trigger — track the changelog. (Distinct from the Phase 1.5 GitHub→proxy webhook, which is about detecting out-of-band pushes, not proxied ones.)
 3. **Force-push semantics inbound:** does the proxy accept client force-pushes and mirror them, or restrict them? (Interacts with the divergence policy.)
 4. **Name & domain:** worth picking early since the URL *is* the product surface.
 5. **Human auth UX (research follow-up):** token issuance + SSH-remote migration is the friction point for human users. Evaluate setup-CLI, credential-helper, OAuth device flow, and GitHub App approaches (see Auth & transport notes) before Phase 5 docs are written.
@@ -156,3 +172,4 @@ Goal: 100% coverage on core sync code, and confidence that the number isn't vacu
 | 128MB ceiling excludes desirable repos | Published limits + shallow/single-branch sync + Container fallback path |
 | Divergence in shared repos erodes trust | Pause-and-notify default; never silent force-push; loud status surface |
 | Git protocol edge cases mocks miss | Real-git conformance layer in CI (Phase 4.4) |
+| Stale reads served from Artifacts (commit landed on GitHub out-of-band) | Default-on background poll + optional webhook (Phase 1.5); reconciliation lag surfaced on the status endpoint, never hidden; proxy-exclusive mode only for repos that guarantee no bypass writes |
