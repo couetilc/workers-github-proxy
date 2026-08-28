@@ -25,18 +25,26 @@ Every design decision (GitHub-convention URL paths, auth that fits git basic aut
 | URL scheme | GitHub path conventions: `https://<your-domain>/<owner>/<repo>.git` — a pure host substitution from an existing GitHub remote |
 | Durable buffer | Artifacts itself (queue messages carry pointers, never pack data) |
 | Sync orchestration | Cloudflare Queues (trigger + retry/DLQ) and/or Workflows (durable multi-step sync) |
-| Concurrency | One Durable Object per repo; all ref updates and sync jobs for a repo are linearized through its DO |
+| Concurrency | One Durable Object per repo as control plane: linearizes sync state + admission via leases; data-plane writes to Artifacts/GitHub run concurrently under git's CAS ref semantics |
 | Sync state modeling | XState state machines for the sync lifecycle |
 | Test target | 100% coverage on core sync logic, enforced in CI, backed by mutation testing so the number is meaningful |
 
-### Durable Object design note
+### Core syncing logic — Durable Object per repo
 
-One DO per `owner/repo`. The DO owns:
-- The authoritative "sync cursor" (last GitHub-confirmed SHA per ref)
-- A serialized job lane: concurrent pushes to the same repo enqueue in arrival order; the DO ensures at most one sync-to-GitHub is in flight per repo
-- Divergence state (paused/needs-attention) so a conflicted repo stops syncing loudly instead of thrashing
+**Principle:** DOs linearize per-repo sync *state and admission*; all actual writes to Artifacts and GitHub happen concurrently in the data plane, protected by git's own compare-and-swap ref semantics.
 
-Cross-repo concurrency needs no coordination — repos are independent, which matches both DO sharding and Artifacts' repo-per-agent model.
+**Control plane (one DO per `owner/repo`):**
+- Owns the sync cursor (last GitHub-confirmed SHA per ref) and divergence state (paused/needs-attention — a conflicted repo stops syncing loudly instead of thrashing)
+- Grants at most one **sync lease** per repo (TTL-bounded); receives ref-update notifications and sync outcomes; advances the cursor on success
+- **Coalescing for free:** ref updates arriving mid-sync don't queue as separate jobs — when the current lease resolves, the next lease targets the newest SHA. Ten rapid agent pushes become one GitHub round-trip; a long outage buffer drains in one sync per ref, not one per commit.
+- Uses **DO alarms** for parked-retry scheduling in outage mode — a repo with buffered commits wakes itself on the slow cadence, no external ticks
+
+**Data plane (outside the DO):**
+- Inbound pushes stream client → Worker → Artifacts fully concurrently; the DO is *not* in the hot path. Races on the same ref are resolved by Artifacts' own receive-pack CAS (`old-sha new-sha`) — the losing client gets a standard non-fast-forward, exactly what git clients expect. Push is acked the moment Artifacts confirms; the DO notification is async. **Durability point = Artifacts, never sync progress.**
+- The queue consumer holding the lease does the heavy isomorphic-git fetch/push. Keeping the 128MB memory load out of the DO means an OOM on a big sync can never take down the state holder.
+- Consumer crash mid-push is safe: lease expires → next job runs → idempotency check (compare GitHub's current ref first) finds the push either landed (no-op) or redoes it
+
+**Granularity:** per-repo lanes, not per-ref, for v1 — pack fetches overlap heavily across refs and per-ref cursors complicate the model for marginal gain on agent-sized repos. Cross-repo needs no coordination; repos are independent, matching both DO sharding and Artifacts' repo-per-agent model.
 
 ---
 
