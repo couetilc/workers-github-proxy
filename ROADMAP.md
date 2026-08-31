@@ -20,11 +20,14 @@ Every design decision (GitHub-convention URL paths, auth that fits git basic aut
 
 | Concern | Decision |
 |---|---|
-| Git implementation | isomorphic-git over in-memory FS (the Artifacts-documented pattern) |
-| Inbound push endpoint | Thin streaming proxy for smart-HTTP (`info/refs` + `git-receive-pack`) → Artifacts. No packfile parsing on the hot path. |
+| Sync engine | Phase 0 bake-off: real `git` in a pooled Sandbox container (multi-GB memory, thin packs, delta compression) vs. isomorphic-git over in-memory FS in the Worker (the Artifacts-documented pattern). Container pool is the leading candidate — it removes the 128MB heap and non-delta-pack ceilings. |
+| Inbound push endpoint | Thin streaming proxy for smart-HTTP (`info/refs` + `git-receive-pack`) → Artifacts. No packfile parsing on the hot path. Containers are never on this path — durability = client → Worker stream → Artifacts, with no scheduling dependency in front of the ack. |
+| Sync trigger | Native Artifacts event subscription: `cf.artifacts.repo.pushed` carries `ref`/`before`/`after` into a Queue — the proxy never parses push results. Repo-level subscription created at repo auto-create. Backstopped by DO alarm reconciliation (correctness never depends on event delivery). |
+| Initial mirror | Native Artifacts `import()` for public GitHub repos (branch + depth options; Artifacts does the heavy fetch, not our compute). Private repos go through the sync engine unless authenticated import proves out (Phase 0 experiment). |
 | URL scheme | GitHub path conventions: `https://<your-domain>/<owner>/<repo>.git` — a pure host substitution from an existing GitHub remote |
 | Durable buffer | Artifacts itself (queue messages carry pointers, never pack data) |
-| Sync orchestration | Cloudflare Queues (trigger + retry/DLQ) and/or Workflows (durable multi-step sync) |
+| Sync orchestration | Cloudflare Queues (native `pushed`-event delivery + retry/DLQ) and/or Workflows (durable multi-step sync) |
+| Artifacts platform limits (documented) | 10 GB/repo, 1 TB/account (raisable on request), 2,000 git requests per 10s per repo; ops $0.15/1k + storage $0.50/GB-mo past included amounts |
 | Concurrency | One Durable Object per repo as control plane: linearizes sync state + admission via leases; data-plane writes to Artifacts/GitHub run concurrently under git's CAS ref semantics |
 | Sync state modeling | XState state machines for the sync lifecycle |
 | Read-path freshness | Background poll (default on, per-repo interval) reconciles out-of-band GitHub pushes into Artifacts; optional GitHub webhook supplements/replaces polling for lower latency; opt-in "proxy-exclusive mode" skips reconciliation entirely for repos that guarantee the proxy is the sole write path |
@@ -42,8 +45,20 @@ Every design decision (GitHub-convention URL paths, auth that fits git basic aut
 
 **Data plane (outside the DO):**
 - Inbound pushes stream client → Worker → Artifacts fully concurrently; the DO is *not* in the hot path. Races on the same ref are resolved by Artifacts' own receive-pack CAS (`old-sha new-sha`) — the losing client gets a standard non-fast-forward, exactly what git clients expect. Push is acked the moment Artifacts confirms; the DO notification is async. **Durability point = Artifacts, never sync progress.**
-- The queue consumer holding the lease does the heavy isomorphic-git fetch/push. Keeping the 128MB memory load out of the DO means an OOM on a big sync can never take down the state holder.
+- The queue consumer holding the lease dispatches the heavy fetch/push to the sync engine. Keeping the memory load out of the DO means an OOM on a big sync can never take down the state holder.
 - Consumer crash mid-push is safe: lease expires → next job runs → idempotency check (compare GitHub's current ref first) finds the push either landed (no-op) or redoes it
+
+### Sync execution — pooled Sandbox containers (leading candidate)
+
+The Worker never does the memory-heavy git work itself; the queue consumer dispatches to a small pool of Sandbox containers running real `git`. Division of labor: **Queues deliver the work (retry/DLQ), the per-repo DO admits it (one lease), containers execute it.**
+
+- **Pool, not per-repo:** a fixed set of container (sandbox) IDs shared across all repos. The repo DO's lease already serializes per-repo sync, so the pool holds no per-repo state — it is pure execution capacity.
+- **Repo→container affinity:** consistent-hash `owner/repo` onto the pool so a repo's syncs land on the same warm container, which keeps the repo cloned on disk — repeat syncs become incremental `git fetch`/`git push`, not full re-clones.
+- **Containers hold no authoritative state:** a killed container loses only a disk cache; the DO cursor and Artifacts remain the truth.
+- **Real git wins:** thin packs, delta compression, no 128MB JS heap — and it's the same engine the Artifacts CI guide (`@cloudflare/ci` + Sandbox SDK) already documents against Artifacts repos.
+- **Costs to measure in Phase 0:** cold start (seconds) when the pool scales from zero, per-second runtime billing, idle-timeout tuning. During a GitHub outage nothing syncs — jobs park in the DO and the pool sleeps, so outage buffering costs ~nothing in compute.
+
+Fallback/alternative: isomorphic-git in the Worker stays viable for small incremental syncs if the bake-off shows container latency or cost is prohibitive at low volume.
 
 **Granularity:** per-repo lanes, not per-ref, for v1 — pack fetches overlap heavily across refs and per-ref cursors complicate the model for marginal gain on agent-sized repos. Cross-repo needs no coordination; repos are independent, matching both DO sharding and Artifacts' repo-per-agent model.
 
@@ -51,6 +66,7 @@ Every design decision (GitHub-convention URL paths, auth that fits git basic aut
 
 - **HTTPS-only.** The proxy terminates TLS at the edge and works on the plaintext smart-HTTP exchange — the only architecture that supports buffering and replay. SSH remotes cannot be proxied (end-to-end encrypted; Workers can't terminate inbound SSH). Docs must state that the one-command swap requires an HTTPS remote.
 - **Agents: smooth.** Agents overwhelmingly authenticate with HTTPS tokens already; a proxy-minted token in the credential helper (or embedded in the swapped URL) fits their existing flow.
+- **Artifacts side is documented, not experimental:** git Basic auth as `x:<token-secret>`; tokens are `art_v1_<40 hex>?expires=<unix>` (strip the `?expires=` suffix for the password), per-repo with `read`/`write` scopes, TTL 1 minute–1 year (default 24h). The proxy's server-side mapping mints short-lived scoped tokens rather than holding long-lived ones.
 - **Humans: known friction point.** SSH-remote users need a remote migration, and everyone needs a token issued and installed — which strains the one-command north star. **Open research item (pre-Phase 5):** investigate UX improvements, e.g. a tiny setup CLI — strawman: `npx git-cloud setup`, which authenticates, mints the token, and rewrites the remote in one step (preserving the one-command story for humans, just a different command than the raw sed swap agents use) — git credential-helper integration, OAuth device flow for token issuance, or GitHub App–based identity so users authorize once in a browser. Goal: human onboarding no worse than `gh auth login`.
 - **Trust posture:** proxy sees plaintext contents and credentials by necessity → self-host deployment ("your Worker, your account, your secrets") is the primary trust answer; client tokens verified per-request and never persisted; Cloudflare at-rest encryption covers Artifacts/R2. Client-side encryption (`git-remote-gcrypt`-style) passes through unmodified for users who want the proxy blind to contents.
 
@@ -60,22 +76,24 @@ Every design decision (GitHub-convention URL paths, auth that fits git basic aut
 
 Goal: kill the unknowns before building anything permanent.
 
-- [ ] Confirm Artifacts beta access; create/fork repos via the Workers binding
-- [ ] Prove the pass-through proxy: real `git push` from CLI → Worker → Artifacts, verified with `git clone` from Artifacts
-- [ ] Prove the sync leg: isomorphic-git in a Worker fetches from Artifacts and pushes to a GitHub repo (fast-forward case)
-- [ ] Prove non-thin pack behavior: confirm fetched packs from Artifacts push cleanly to GitHub receive-pack
-- [ ] First rough memory ceiling: at what repo size does the sync leg fall over in workerd?
+- [ ] Confirm Artifacts beta access; create/fork repos via the Workers binding (gating item — request first, it has lead time we don't control)
+- [ ] Prove the pass-through proxy: real `git push` from CLI → Worker → Artifacts, verified with `git clone` from Artifacts. Probe the inbound request-body ceiling with progressively larger packs — Cloudflare edge body limits, not workerd memory, likely bind first.
+- [ ] **Sync-engine bake-off** — fetch from Artifacts, push to GitHub (fast-forward case), both engines:
+  - (a) real `git` in a Sandbox container: cold start, warm-affinity incremental sync time, cost per sync, practical repo-size ceiling per instance type
+  - (b) isomorphic-git in the Worker: memory + CPU ceiling (measured deployed, not just `wrangler dev` — local dev doesn't enforce the 128MB limit), and non-thin/non-delta pack acceptance by GitHub receive-pack
+- [ ] **`pushed` event subscription:** create the repo-level subscription at repo creation; measure delivery latency and behavior under bursts; confirm account-level events cover auto-created repos' lifecycle
+- [ ] **Native import:** initial mirror of a public GitHub repo via `import()`; test whether a credential-embedded HTTPS URL imports a private repo (undocumented — if it works, initial mirror is native for private repos too)
 
-**Exit criteria:** end-to-end demo (push → Artifacts → GitHub) on a toy repo; a written list of anything that didn't work as expected.
+**Exit criteria:** end-to-end demo (push → Artifacts → GitHub) on a toy repo; a recorded sync-engine decision backed by bake-off numbers; a written list of anything that didn't work as expected.
 
 ## Phase 1 — MVP (~2–3 weeks)
 
 Goal: a usable single-tenant proxy for agent-sized repos.
 
 - [ ] **Routing:** GitHub-convention URL parsing (`/:owner/:repo.git/info/refs`, `/:owner/:repo.git/git-receive-pack`, and the read paths `git-upload-pack` so clones/fetches through the proxy also work)
-- [ ] **Repo mapping:** `owner/repo` → Artifacts repo (auto-create/fork on first push) + GitHub upstream config
+- [ ] **Repo mapping:** `owner/repo` → Artifacts repo (auto-create/fork on first push, creating the repo-level `pushed` event subscription in the same step) + GitHub upstream config
 - [ ] **Auth:** proxy-minted tokens presented as git basic auth; server-side mapping to Artifacts tokens + GitHub PAT/App installation token. Secrets in Worker secrets/bindings.
-- [ ] **Sync pipeline v1:** on successful push, DO records ref update → enqueue `{repo, ref, oldSha, newSha}` → consumer (via the repo's DO) runs isomorphic-git fetch/push
+- [ ] **Sync pipeline v1:** native `pushed` event (`ref`, `before`, `after`) → Queue → consumer acquires the repo DO's lease → sync engine (per the Phase 0 decision) runs fetch/push. Backstop: DO alarm periodically compares Artifacts ref state against the cursor, so a lost event can delay a sync but never strand one.
 - [ ] **Idempotent replay:** consumer compares GitHub's current ref before pushing; no-op if already synced
 - [ ] **Status endpoint:** per-repo JSON — buffered refs, last sync time, divergence flag
 - [ ] Deploy under a real domain; write the "change one string in your remote URL" quickstart
@@ -120,10 +138,10 @@ Important nuance: the sync leg speaks **git smart-HTTP**, not the REST API — s
 Goal: replace "it depends" with a published, continuously re-verified limits table.
 
 - [ ] **Benchmark harness:** synthetic repo generator sweeping three axes independently — file count, largest blob size, history depth — plus realistic composites (typical agent repo, typical web app)
-- [ ] **Measurement:** local workerd runs with memory profiling for precise numbers; deployed binary-search (push increasing sizes until failure) to validate the real 128MB ceiling
+- [ ] **Measurement:** per engine — container pool: repo-size ceiling per instance type, cold vs. warm sync time, cost per sync; in-Worker isomorphic-git (if kept for small syncs): local workerd runs with memory profiling, deployed binary-search to validate the real 128MB ceiling. Inbound path: the edge request-body ceiling from Phase 0, re-verified.
 - [ ] **CI integration:** benchmarks run on every merge to main and nightly; results committed to a `LIMITS.md` with trend history — a regression fails the build
 - [ ] **Published limits table:** e.g., "initial mirror: repos up to X MB packed; incremental sync: pushes up to Y MB" — with the failure mode described for oversize cases (clear error, repo stays safe in Artifacts)
-- [ ] **Optimization backlog (post-limits):** single-branch + shallow fetch in the sync leg; incremental pack windows for large histories; Container fallback offer for oversized initial mirrors
+- [ ] **Optimization backlog (post-limits):** single-branch + shallow fetch in the sync leg; incremental pack windows for large histories; native `import()` already covers oversized initial mirrors of public repos — extend to private if authenticated import proved out in Phase 0, otherwise route oversized private mirrors to a dedicated large-instance container
 
 **Exit criteria (initial):** LIMITS.md exists, is generated by CI not by hand, and the quickstart links to it.
 
@@ -147,7 +165,7 @@ Goal: 100% coverage on core sync code, and confidence that the number isn't vacu
 ## Phase 5 — DX, observability & launch (~week 8+)
 
 - [ ] Docs site: quickstart (URL substitution), agent integration guide (Claude Code / generic), limits page, failure-semantics page
-- [ ] Observability: per-repo sync lag metric, buffered-commit count, GitHub health status page; Workers Analytics Engine or logs → dashboard
+- [ ] Observability: per-repo sync lag metric, buffered-commit count, GitHub health status page; Workers Analytics Engine or logs → dashboard. Lean on Artifacts' native GraphQL metrics (operations/errors/pushes by repo) and `cloned`/`fetched` events for the Artifacts side instead of instrumenting it ourselves.
 - [ ] **Upstream status page:** not a probe — a status page summarizing observed data from the system's real interactions with GitHub (rolling availability estimate of the git endpoints, incident timeline, current health signal). Built entirely from the Phase 2 passive dataset; still serves as the landing-page proof point ("here's what our traffic saw"), with methodology noted so the passive-measurement basis is transparent
 - [ ] Multi-tenancy decision: self-host template (wrangler deploy, bring your own domain + GitHub App) first; hosted service later if demand appears
 - [ ] GitHub App instead of PATs (installation tokens, fine-grained repo perms, better rate limits)
@@ -159,17 +177,21 @@ Goal: 100% coverage on core sync code, and confidence that the number isn't vacu
 ## Open questions
 
 1. ~~**Read path scope**~~ — resolved: see **Phase 1.5**. Reads are served from Artifacts with default-on poll + optional webhook reconciliation, not deferred to later.
-2. **Artifacts webhooks:** if push-event subscriptions ship during development, they replace the "enqueue after proxied push" trigger — track the changelog. (Distinct from the Phase 1.5 GitHub→proxy webhook, which is about detecting out-of-band pushes, not proxied ones.)
+2. ~~**Artifacts webhooks**~~ — resolved: event subscriptions shipped (Artifacts docs, May 2026). `cf.artifacts.repo.pushed` carries `ref`/`before`/`after` and replaces the "enqueue after proxied push" trigger; repo-level subscriptions are created at repo auto-create. (Still distinct from the Phase 1.5 GitHub→proxy webhook, which detects out-of-band pushes.)
 3. **Force-push semantics inbound:** does the proxy accept client force-pushes and mirror them, or restrict them? (Interacts with the divergence policy.)
 4. **Name & domain:** worth picking early since the URL *is* the product surface.
 5. **Human auth UX (research follow-up):** token issuance + SSH-remote migration is the friction point for human users. Evaluate setup-CLI, credential-helper, OAuth device flow, and GitHub App approaches (see Auth & transport notes) before Phase 5 docs are written.
+6. **Container pool economics:** pool size, idle timeout, cold-start amortization, and per-sync cost at low volume — the Phase 0 bake-off produces the numbers; the answer may be volume-dependent (isomorphic-git for tiny syncs, containers above a threshold).
+7. **Private-repo import auth:** `import()` documents public HTTPS remotes only. If credential-embedded URLs work, initial mirror is fully native; if not, private initial mirrors go through the sync engine.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
 | Artifacts beta changes/limits | Keep the Artifacts interface behind an adapter; it's just a git remote + management binding |
-| 128MB ceiling excludes desirable repos | Published limits + shallow/single-branch sync + Container fallback path |
+| Sync memory ceiling excludes desirable repos | Pooled real-git containers as leading engine (multi-GB instances); native `import()` for initial mirrors of public repos; published limits + shallow/single-branch for the in-Worker engine |
+| Missed `pushed` events strand buffered commits | DO alarm reconciliation compares Artifacts ref state to the sync cursor on a slow cadence — event delivery is a latency optimization, never a correctness dependency |
+| Container cold starts / cost undermine sync latency or unit economics | Repo→container affinity keeps warm clones; pool sleeps during outages; isomorphic-git in-Worker path retained for small syncs if numbers demand it (Phase 0 bake-off decides) |
 | Divergence in shared repos erodes trust | Pause-and-notify default; never silent force-push; loud status surface |
 | Git protocol edge cases mocks miss | Real-git conformance layer in CI (Phase 4.4) |
 | Stale reads served from Artifacts (commit landed on GitHub out-of-band) | Default-on background poll + optional webhook (Phase 1.5); reconciliation lag surfaced on the status endpoint, never hidden; proxy-exclusive mode only for repos that guarantee no bypass writes |
