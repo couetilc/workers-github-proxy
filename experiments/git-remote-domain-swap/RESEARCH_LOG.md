@@ -139,3 +139,29 @@ design + conclusions in `README.md`.
   pushes — mirrors the roadmap's hot-path requirement.
 - Deliberately exercise the thin-pack ingest path and confirm reconstruction
   behavior without the base repo.
+
+---
+
+## 2026-08-31 · Portability fix — 500 on macOS
+
+**Report.** Running `run.sh` on macOS (git 2.51.2) passed the passive step but the
+transparent push failed: `unable to access '.../hello-world.git/': The requested
+URL returned error: 500`.
+
+**Cause.** `transparent-interceptor.js` hardcoded `git-http-backend` at the Debian
+path `/usr/lib/git-core/git-http-backend`. On macOS the binary lives elsewhere
+(Homebrew's `libexec/git-core`, or the CommandLineTools path). The `spawn` hit
+ENOENT, our `cgi.on('error')` handler returned 500, and git surfaced it as the
+HTTP 500 above. So it was never a protocol problem — just a missing binary on the
+assumed path.
+
+**Fix.** Resolve the backend at startup instead of hardcoding: prefer
+`GIT_HTTP_BACKEND` if set, else `path.join(git --exec-path, 'git-http-backend')`,
+else the old Linux path as a last resort; if none exists, exit with a clear
+message naming the candidates tried. Startup now logs the resolved path. Verified
+the reproduction still passes on Linux; the same resolution picks up the macOS
+location via `git --exec-path`.
+
+**Learning.** Anything that shells out to git's helper binaries must ask
+`git --exec-path` rather than assume a distro layout — the exec-path is the
+portable source of truth.
