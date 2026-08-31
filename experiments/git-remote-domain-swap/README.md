@@ -93,6 +93,11 @@ KEEP=1 ./code/run.sh   # keep the temp workdir for poking around
 Ports default to 8080 (passive) and 8081 (transparent); override with
 `PASSIVE_PORT` / `XPARENT_PORT`.
 
+The transparent interceptor locates `git-http-backend` via `git --exec-path`, so
+it works across platforms (Debian's `/usr/lib/git-core`, Homebrew/CommandLineTools
+paths on macOS, etc.). For an unusual install, set `GIT_HTTP_BACKEND` to the
+binary's full path.
+
 ## Results
 
 **Passive** captured both handshake probes and nothing else:

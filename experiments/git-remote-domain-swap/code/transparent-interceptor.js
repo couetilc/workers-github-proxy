@@ -15,15 +15,36 @@
 //   DUMP_DIR          if set, carve any received packfile to $DUMP_DIR/intercepted.pack
 
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { describeBody } = require('./wire');
 
 const PORT = process.env.PORT || 8081;
 const PROJECT_ROOT = process.env.GIT_PROJECT_ROOT || path.join(__dirname, '_work', 'bare-repos');
 const DUMP_DIR = process.env.DUMP_DIR || '';
-// git-http-backend is not on PATH; it lives under git's exec-path.
-const BACKEND = process.env.GIT_HTTP_BACKEND || '/usr/lib/git-core/git-http-backend';
+
+// git-http-backend is not on PATH; it lives under git's exec-path, which differs
+// by platform and install (e.g. /usr/lib/git-core on Debian,
+// /opt/homebrew/.../libexec/git-core or the CommandLineTools path on macOS). Ask
+// git itself where it is rather than hardcoding a Linux path.
+function resolveBackend() {
+  const candidates = [];
+  if (process.env.GIT_HTTP_BACKEND) candidates.push(process.env.GIT_HTTP_BACKEND);
+  const execPath = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+  if (execPath.status === 0 && execPath.stdout) {
+    candidates.push(path.join(execPath.stdout.trim(), 'git-http-backend'));
+  }
+  candidates.push('/usr/lib/git-core/git-http-backend'); // last-resort fallback
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c; } catch { /* ignore */ }
+  }
+  console.error('FATAL: could not locate git-http-backend. Tried:\n  ' +
+    candidates.join('\n  ') +
+    '\nSet GIT_HTTP_BACKEND to its path, or check `git --exec-path`.');
+  process.exit(1);
+}
+const BACKEND = resolveBackend();
 
 function log(...a) { console.log(...a); }
 
@@ -115,5 +136,6 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   log(`transparent git backend on http://127.0.0.1:${PORT}/  (serving ${PROJECT_ROOT})`);
+  log(`using git-http-backend: ${BACKEND}`);
   if (DUMP_DIR) log(`packfiles will be carved to ${DUMP_DIR}/intercepted.pack`);
 });
