@@ -18,6 +18,14 @@ Your laboratory is a directory under `./experiments/<experiment-name>/`. Use it
 as a scratchpad. It must contain a README.md discussing the experimental design
 and the conclusions. It must also contain a RESEARCH_LOG.md, a notebook keeping
 track of ideas and attempts during the experiment(s). Any code you write for
-the experiment can live in appropriately named sub-directories. The experiment
-should be reproducible, preferably with a single command.
+the experiment can live in appropriately named sub-directories. Those
+directories should be described in the README, along with the command to
+reproduce the experiment and any suggestions for follow-up work.
 
+## Experiments
+
+Keep this index of experiments up to date.
+
+| Experiment | Question | Status |
+|---|---|---|
+| [git-remote-domain-swap](./git-remote-domain-swap) | Can swapping a remote's domain let you receive and inspect git pushes/fetches? | ✅ Yes — depth depends on protocol compliance; **TLS/host-key identity is what protects a real push** |
