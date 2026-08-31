@@ -22,6 +22,11 @@ the experiment can live in appropriately named sub-directories. Those
 directories should be described in the README, along with the command to
 reproduce the experiment and any suggestions for follow-up work.
 
+## Safety
+
+Experiments stay local and self-contained: bind servers to `127.0.0.1`, use only
+placeholder secrets, and never commit real credentials.
+
 ## Experiments
 
 Keep this index of experiments up to date.
