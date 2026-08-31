@@ -1,0 +1,13 @@
+{
+  "name": "git-remote-domain-swap",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Interception experiment: swap a git remote's domain to a host you control and inspect pushes/fetches. Uses Node built-ins only.",
+  "type": "commonjs",
+  "scripts": {
+    "reproduce": "./run.sh",
+    "passive": "node passive-interceptor.js",
+    "transparent": "node transparent-interceptor.js"
+  },
+  "license": "MIT"
+}
