@@ -9,11 +9,22 @@ as we follow the path of experiments. Our goal is understanding, then wisdom.
 
 ## We must establish
 
-- whether the fixed-memory duplex result survives inside **workerd**, using the
-same Fetch and Web Streams APIs as a production Worker. Establish not only that
-real push-request and clone-response packs plateau, but which request-stream
-construction preserves workerd's native backpressure while still allowing a
-bounded receive-pack ref policy and header-level auth replacement.
+- what's next? what are the main features? We've established concurrency can be
+handled efficiently and predictably.
+  - I see two directions:
+  - local integration test with gitea or something as a remote.
+  - local integration tests proxying to gitea.
+  - local integration tests proxying to two instances of gitea. pushes go to
+  both, clones round robin.
+  - online integration tests where remote is github or artifacts.
+
+- once we've establish that syncing mechanism somewhat works, we can start
+thinking about auth. once auth is answered, we can do a v0 deploy and use it
+actually. And then we start use observability to answer questions about the
+sytem, and iterating on it in production and staging. Key thing here is
+recognized unexpected responses and logging them for later analysis, as well as
+run of the mill errors. Because we are a proxy, we may receive requests we
+don't recognize, let's save them so the system can become self-improving.
 
 ## Workspace
 
