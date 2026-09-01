@@ -11,12 +11,11 @@ as we follow the path of experiments. Our goal is understanding, then wisdom.
 
 - what's next? what are the main features? We've established concurrency can be
 handled efficiently and predictably.
-  - I see two directions:
-  - local integration test with gitea or something as a remote.
-  - local integration tests proxying to gitea.
-  - local integration tests proxying to two instances of gitea. pushes go to
-  both, clones round robin.
-  - online integration tests where remote is github or artifacts.
+  - ✅ local integration test with Gitea as a remote.
+  - ✅ local integration tests proxying to Gitea.
+  - **Next:** local integration tests proxying to two instances of Gitea. Pushes
+    go to both, clones round robin.
+  - Later, online integration tests where the remote is GitHub or Artifacts.
 
 - once we've establish that syncing mechanism somewhat works, we can start
 thinking about auth. once auth is answered, we can do a v0 deploy and use it
@@ -47,3 +46,5 @@ Keep this index of experiments up to date.
 | [duplex-streaming-memory](./duplex-streaming-memory) | Can push requests and clone/fetch responses stream through a fixed, small proxy memory budget while auth and ref policy still hold? | ✅ Yes locally — 96 MiB real-Git bodies stayed under 24 MiB RSS delta; **both byte paths plateau with bounded queues** |
 | [workerd-duplex-streaming](./workerd-duplex-streaming) | Does bounded duplex Git streaming survive inside workerd using Worker Fetch and Web Streams? | ✅ Yes with native pass-through — 96 MiB bodies added <1 MiB RSS; **reconstructing the request in JavaScript grows with the pack** |
 | [workerd-concurrency-envelope](./workerd-concurrency-envelope) | How does one warmed workerd Worker behave under concurrent, slow, repeated, and canceled Git streams? | ✅ Bounded in this runtime — RSS tracks active streams, not pack size; **16-way and 20-wave runs showed no body-sized or monotonic per-wave retention** |
+| [gitea-proxy-compatibility](./gitea-proxy-compatibility) | Is the proxy semantically transparent to Git with Gitea upstream while client and upstream credentials remain separated? | ✅ Yes locally — refs/objects and v0/v2 behavior matched; **Git-layer rejection, HTTP 401/404, auth replacement, and Basic challenge survived** |
+| `gitea-user-attribution` | If clients map to a shared upstream service account, how can original user identity remain trustworthy in proxy audit and repository attribution? | 🔜 Planned — compare per-user credentials, trusted identity propagation, and proxy-owned audit before authentication design is fixed |
