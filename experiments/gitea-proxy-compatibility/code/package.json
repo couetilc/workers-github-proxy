@@ -1,0 +1,14 @@
+{
+  "name": "gitea-proxy-compatibility",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment: direct versus workerd-proxied Git smart HTTP against Gitea",
+  "type": "module",
+  "scripts": {
+    "test": "node --test ../../workerd-duplex-streaming/code/policy.test.js"
+  },
+  "devDependencies": {
+    "workerd": "1.20260831.1"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,34 @@
+APP_NAME = Git proxy compatibility laboratory
+RUN_MODE = prod
+RUN_USER = __RUN_USER__
+WORK_PATH = __GITEA_ROOT__
+
+[database]
+DB_TYPE = sqlite3
+PATH = __GITEA_ROOT__/gitea.db
+
+[repository]
+ROOT = __REPOSITORY_ROOT__
+DEFAULT_BRANCH = main
+
+[server]
+DOMAIN = 127.0.0.1
+HTTP_ADDR = 127.0.0.1
+HTTP_PORT = __GITEA_PORT__
+ROOT_URL = http://127.0.0.1:__GITEA_PORT__/
+APP_DATA_PATH = __GITEA_ROOT__/data
+DISABLE_SSH = true
+LFS_START_SERVER = false
+OFFLINE_MODE = true
+
+[security]
+INSTALL_LOCK = true
+
+[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW = true
+
+[log]
+MODE = console
+LEVEL = warn
+ROOT_PATH = __GITEA_ROOT__/log
