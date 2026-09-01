@@ -46,8 +46,12 @@ test('requested state treats matching updates and absent deletions as converged'
 
 test('synthesized receive-pack reports classify success and failure', () => {
   const commands = [{ ref: 'refs/heads/main' }];
-  assert.equal(receivePackReport(successfulReceivePackBody(commands), commands).success, true);
-  const failure = receivePackReport(failedReceivePackBody(commands, 'record-1'), commands);
+  const successBody = successfulReceivePackBody(commands);
+  assert.equal(successBody[4], 1, 'the report must use sideband channel one');
+  assert.equal(receivePackReport(successBody, commands).success, true);
+  const failureBody = failedReceivePackBody(commands, 'record-1');
+  assert.equal(failureBody[4], 1, 'the failure must use sideband channel one');
+  const failure = receivePackReport(failureBody, commands);
   assert.equal(failure.success, false);
   assert.equal(failure.unpackOk, true);
   assert.equal(failure.rejected, true);

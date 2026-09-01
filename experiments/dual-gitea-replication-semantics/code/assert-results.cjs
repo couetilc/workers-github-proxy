@@ -185,10 +185,11 @@ for (const record of sortedMemory) {
     `${caseName}: request did not contain the expected pack-sized body`);
   assert.strictEqual(a.requestBytes, b.requestBytes);
   assert.strictEqual(a.requestSha256, b.requestSha256);
-  assert(b.durationMs >= 100, `${caseName}: replica B was not substantially slow`);
+  assert.strictEqual(b.appliedFault, 'slow');
+  assert(b.durationMs >= 1000, `${caseName}: replica B was not substantially slow`);
   assert(a.durationMs >= 100, `${caseName}: replica A saw no request-path backpressure`);
-  assert(b.durationMs >= a.durationMs * 1.5,
-    `${caseName}: injected replica B was not substantially slower than A`);
+  assert(b.durationMs >= a.durationMs * 0.9,
+    `${caseName}: delayed B unexpectedly completed well before A`);
   assert(record.elapsedMs >= b.durationMs * 0.8,
     `${caseName}: client completed without waiting for the slow replica`);
   const event = finalizeEvent(caseName);

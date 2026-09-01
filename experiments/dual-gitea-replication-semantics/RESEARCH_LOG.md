@@ -66,3 +66,19 @@ chunk could still fire and try to update that digest, crashing gateway B before
 the recovery advertisement. Post-finalization data is now ignored. This does
 not change the injected disconnect; it keeps the observation process alive for
 the subsequent recovery.
+
+The first default-size assertion pass reached the end with correct repositories
+but rejected the 32 MiB timing because B was less than 1.5 times slower than A.
+That ratio is the wrong invariant: at the larger size, coupled backpressure also
+slows A, so replica completion times approach one another. The gate now checks
+that B's injected delay is substantial, that complete request bytes and hashes
+match, that the client waits for B, and that memory remains bounded.
+
+Inspection of the retained failure logs found a correctness issue in the
+client-facing aggregate response. The proxy returned pkt-line `unpack`/`ng`
+records directly, but Gitea's advertised `side-band-64k` capability requires
+the report to be wrapped in sideband channel 1. Git failed the push but printed
+`bad band #117` (ASCII `u`) rather than the reconciliation reason. Synthesized
+success and failure reports now use the same outer channel-1 packet and flush as
+Gitea. The harness additionally requires every intended partial-write failure
+to display `replication incomplete; reconciliation <id>` in Git's stderr.

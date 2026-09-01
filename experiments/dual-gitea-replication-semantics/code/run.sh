@@ -188,6 +188,10 @@ push_fails() {
     printf '%s unexpectedly reported push success\n' "$case_name" >&2
     return 1
   fi
+  grep --quiet 'replication incomplete; reconciliation ' "$WORK/logs/$case_name.log" || {
+    printf '%s did not show a clear reconciliation requirement to Git\n' "$case_name" >&2
+    return 1
+  }
 }
 
 start_sampler() {

@@ -81,21 +81,29 @@ export function receivePackReport(bytes, commands) {
 }
 
 export function successfulReceivePackBody(commands) {
-  const chunks = [pktLine('unpack ok\n')];
-  for (const command of commands) chunks.push(pktLine(`ok ${command.ref}\n`));
-  chunks.push(encoder.encode('0000'));
-  return concatBytes(chunks);
+  const report = [pktLine('unpack ok\n')];
+  for (const command of commands) report.push(pktLine(`ok ${command.ref}\n`));
+  report.push(encoder.encode('0000'));
+  return sidebandReport(report);
 }
 
 export function failedReceivePackBody(commands, reconciliationId) {
-  const chunks = [pktLine('unpack ok\n')];
+  const report = [pktLine('unpack ok\n')];
   for (const command of commands) {
-    chunks.push(pktLine(
+    report.push(pktLine(
       `ng ${command.ref} replication incomplete; reconciliation ${reconciliationId}\n`,
     ));
   }
-  chunks.push(encoder.encode('0000'));
-  return concatBytes(chunks);
+  report.push(encoder.encode('0000'));
+  return sidebandReport(report);
+}
+
+function sidebandReport(reportChunks) {
+  const report = concatBytes(reportChunks);
+  const channelOne = new Uint8Array(report.byteLength + 1);
+  channelOne[0] = 1;
+  channelOne.set(report, 1);
+  return concatBytes([pktLine(channelOne), encoder.encode('0000')]);
 }
 
 // Unlike ReadableStream.tee(), the source advances only after every active
