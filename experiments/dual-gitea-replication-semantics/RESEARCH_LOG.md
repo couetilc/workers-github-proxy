@@ -45,3 +45,24 @@ there is no requested final state to verify and the coupled distributor waited
 for an unnecessary second consumer. The fix routes command-free probes through
 A only and reserves dual-write aggregation for the following command-bearing
 RPC. A probe cannot mutate refs, so this does not weaken the replication claim.
+
+The next run completed all repository operations and stopped in the result
+assertions because the fault gateway did not finalize audit rows for its early
+401/404 responses. The Worker and both repository states were correct; this was
+an observer lifecycle bug. For deterministic auditing, those synthetic status
+responses now drain the small experimental request before replying.
+
+The 8 MiB slow-consumer measurement also showed that backpressure is not
+lockstep at the two gateway sockets. A received its body in about 5.5 seconds
+while delayed B took about 15.5 seconds, and the client completed only after B.
+The coupled JavaScript distributor retained a maximum 4 KiB source chunk, but
+workerd's HTTP client and the kernel can absorb a bounded amount per outbound
+connection. Assertions therefore require bounded Worker RSS and client latency
+coupled to B, not equal A/B completion times.
+
+A reduced-size diagnostic run then exposed a second fault-injector bug: after
+the disconnect row finalized its SHA-256 digest, an already-buffered request
+chunk could still fire and try to update that digest, crashing gateway B before
+the recovery advertisement. Post-finalization data is now ignored. This does
+not change the injected disconnect; it keeps the observation process alive for
+the subsequent recovery.

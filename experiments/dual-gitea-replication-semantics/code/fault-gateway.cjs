@@ -113,6 +113,7 @@ const server = http.createServer((request, response) => {
   }
 
   request.on('data', (chunk) => {
+    if (finalized) return;
     if (record.firstRequestByteMs === null) record.firstRequestByteMs = Math.round(elapsedMs());
     record.requestBytes += chunk.length;
     requestHash.update(chunk);
@@ -159,19 +160,19 @@ const server = http.createServer((request, response) => {
   }
 
   if (fault === 'http-401') {
-    send(401, {
+    request.resume();
+    request.once('end', () => send(401, {
       'content-type': 'text/plain',
       'www-authenticate': 'Basic realm="replica-b-fault"',
       connection: 'close',
-    }, Buffer.from('replica B injected authentication failure\n'));
-    request.resume();
+    }, Buffer.from('replica B injected authentication failure\n')));
     return;
   }
 
   if (fault === 'http-404') {
-    send(404, { 'content-type': 'text/plain', connection: 'close' },
-      Buffer.from('replica B injected missing repository\n'));
     request.resume();
+    request.once('end', () => send(404, { 'content-type': 'text/plain', connection: 'close' },
+      Buffer.from('replica B injected missing repository\n')));
     return;
   }
 

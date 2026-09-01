@@ -409,6 +409,7 @@ git_direct divergence-clone clone -q "$DIRECT_B" "$WORK/divergent-b"
 git -C "$WORK/divergent-b" config user.name DivergentExperimenter
 git -C "$WORK/divergent-b" config user.email divergent@localhost
 git -C "$WORK/divergent-b" config commit.gpgsign false
+git -C "$WORK/divergent-b" config core.hooksPath /dev/null
 printf 'replica B only\n' >"$WORK/divergent-b/divergent-b.txt"
 git -C "$WORK/divergent-b" add divergent-b.txt
 git -C "$WORK/divergent-b" commit -q --no-verify -m 'deliberately diverge replica B'
