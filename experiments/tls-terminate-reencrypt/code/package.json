@@ -1,0 +1,14 @@
+{
+  "name": "tls-terminate-reencrypt",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment: a git remote proxy that terminates the client's TLS, works on the plaintext smart-HTTP exchange, and re-encrypts to the upstream service. Node built-ins + openssl only.",
+  "type": "commonjs",
+  "scripts": {
+    "reproduce": "./run.sh",
+    "certs": "./gen-certs.sh ./_work/certs",
+    "upstream": "node upstream-server.js",
+    "proxy": "node tls-reencrypt-proxy.js"
+  },
+  "license": "MIT"
+}
