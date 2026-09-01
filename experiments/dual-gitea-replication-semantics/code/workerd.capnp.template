@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "proxy", worker = .proxyWorker),
+    (name = "replicaA", external = (address = "127.0.0.1:__GATEWAY_A_PORT__", http = ())),
+    (name = "replicaB", external = (address = "127.0.0.1:__GATEWAY_B_PORT__", http = ())),
+    (name = "verifyA", external = (address = "127.0.0.1:__GITEA_A_PORT__", http = ())),
+    (name = "verifyB", external = (address = "127.0.0.1:__GITEA_B_PORT__", http = ())),
+    (name = "reconciliation", external = (address = "127.0.0.1:__RECORDER_PORT__", http = ())),
+  ],
+  sockets = [
+    (name = "http", address = "127.0.0.1:__WORKERD_PORT__", http = (), service = "proxy"),
+  ],
+);
+
+const proxyWorker :Workerd.Worker = (
+  modules = [
+    (name = "replication-worker.js", esModule = embed "replication-worker.js"),
+    (name = "replication-core.js", esModule = embed "replication-core.js"),
+    (name = "policy.js", esModule = embed "../../workerd-duplex-streaming/code/policy.js"),
+  ],
+  compatibilityDate = "2026-08-31",
+  bindings = [
+    (name = "REPLICA_A", service = "replicaA"),
+    (name = "REPLICA_B", service = "replicaB"),
+    (name = "VERIFY_A", service = "verifyA"),
+    (name = "VERIFY_B", service = "verifyB"),
+    (name = "RECONCILIATION", service = "reconciliation"),
+    (name = "CLIENT_AUTH", text = "Bearer client-only"),
+    (name = "UPSTREAM_AUTH", text = "__UPSTREAM_AUTH__"),
+    (name = "MAX_COMMAND_PREFIX", text = "65536"),
+  ],
+);
