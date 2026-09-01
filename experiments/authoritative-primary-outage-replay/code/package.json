@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "types": "wrangler types --config wrangler.jsonc",
-    "check": "wrangler types --config wrangler.jsonc --check",
+    "check": "npm test && wrangler types --config wrangler.jsonc --check",
+    "test": "node --test src/index.test.js replay-policy.test.js",
     "dev": "wrangler dev --config wrangler.jsonc"
   },
   "devDependencies": {

@@ -46,6 +46,9 @@ Git, curl, and jq:
 cd code
 npm ci
 ./run-first-gate.sh
+
+# Requires a new, empty, disposable private repository.
+GITHUB_TEST_REPO=owner/repository KEEP=1 ./run-outage-replay.sh
 ```
 
 The first-gate run creates a uniquely named repository in the
@@ -61,11 +64,18 @@ authoritative-primary-outage-replay/
 |-- RESEARCH_LOG.md           chronological notebook
 `-- code/
     |-- run-first-gate.sh     binding create plus smart-HTTP push/clone gate
+    |-- run-outage-replay.sh  complete outage, recovery, and conflict workflow
+    |-- origin-outage.cjs     deterministic GitHub-side HTTP 503 injector
+    |-- replay-policy.js      OID-based replay classification
+    |-- replay-policy.test.js classification unit tests
+    |-- classify-replay.mjs   shell-facing policy command
+    |-- process-tree-rss.cjs  local Wrangler/Worker process-tree sampler
     |-- package.json          pinned Wrangler dependency and commands
     |-- package-lock.json     exact npm dependency graph
     |-- wrangler.jsonc        experiment-specific remote Artifacts binding
     |-- worker-configuration.d.ts generated binding types checked for drift
-    |-- src/index.js          narrow repository/token management Worker
+    |-- src/index.js          management and streaming Git proxy Worker
+    |-- src/index.test.js     proxy routing and host-validation tests
     `-- .gitignore            generated local Wrangler state
 ```
 

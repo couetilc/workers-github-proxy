@@ -3,6 +3,9 @@
   "name": "wgproxy-authoritative-primary-outage-replay",
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
+  "vars": {
+    "ARTIFACTS_NAMESPACE": "workers-github-proxy-experiments"
+  },
   "artifacts": [
     {
       "binding": "ARTIFACTS",
