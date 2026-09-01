@@ -13,9 +13,11 @@ as we follow the path of experiments. Our goal is understanding, then wisdom.
 handled efficiently and predictably.
   - ✅ local integration test with Gitea as a remote.
   - ✅ local integration tests proxying to Gitea.
-  - **Next:** local integration tests proxying to two instances of Gitea. Pushes
-    go to both, clones round robin.
-  - Later, online integration tests where the remote is GitHub or Artifacts.
+  - ✅ local dual-Gitea replication, asymmetric-failure, and recovery tests.
+  - **Next:** prove an Artifacts-backed authoritative primary can accept pushes
+    during an origin outage and replay them later.
+  - Then validate repo-scoped coordination, safe reconciliation policy, and
+    crash-window observability before the deployed proof of concept.
 
 - once we've establish that syncing mechanism somewhat works, we can start
 thinking about auth. once auth is answered, we can do a v0 deploy and use it
@@ -48,4 +50,8 @@ Keep this index of experiments up to date.
 | [workerd-concurrency-envelope](./workerd-concurrency-envelope) | How does one warmed workerd Worker behave under concurrent, slow, repeated, and canceled Git streams? | ✅ Bounded in this runtime — RSS tracks active streams, not pack size; **16-way and 20-wave runs showed no body-sized or monotonic per-wave retention** |
 | [gitea-proxy-compatibility](./gitea-proxy-compatibility) | Is the proxy semantically transparent to Git with Gitea upstream while client and upstream credentials remain separated? | ✅ Yes locally — refs/objects and v0/v2 behavior matched; **Git-layer rejection, HTTP 401/404, auth replacement, and Basic challenge survived** |
 | [dual-gitea-replication-semantics](./dual-gitea-replication-semantics) | Can one workerd proxy stream every push to two Giteas, round-robin reads, and report partial writes honestly? | ✅ Converges with verification/recovery, not atomically — **every asymmetric failure split refs; final-state checks, Git-visible failure, and durable reconciliation are mandatory** |
+| `authoritative-primary-outage-replay` | Can an Artifacts-backed authoritative primary durably accept and serve Git pushes while the origin is unavailable, then replay them to convergence? | 🔜 Next — validate Artifacts access, primary-only acknowledgement, buffered ref updates, origin conflict detection, and recovery |
+| `durable-object-repo-coordination` | Can one repo-scoped Durable Object serialize, coalesce, and recover background sync leases without carrying pack bodies or delaying primary acknowledgement? | 🔜 Planned — test same-repo ordering, cross-repo concurrency, duplicate events, lease expiry, and idempotent retry |
+| `reconciliation-policy-and-protection` | Which observed ref mismatches are safe to repair automatically, and how do protected branches, immutable tags, and expected-old-OID checks constrain recovery? | 🔜 Planned — automate only unambiguous catch-up; classify unrelated history and unsafe rewrites for human review |
+| `crash-window-observability` | Do worker crashes, ambiguous upstream outcomes, lost events, failed verification, and incident-recording failure become safe retries or actionable states? | 🔜 Planned — validate backstop scrubs, critical alerts, and `synced` / `pending_sync` / `needs_review` / `verification_required` outcomes |
 | `gitea-user-attribution` | If clients map to a shared upstream service account, how can original user identity remain trustworthy in proxy audit and repository attribution? | 🔜 Planned — compare per-user credentials, trusted identity propagation, and proxy-owned audit before authentication design is fixed |
