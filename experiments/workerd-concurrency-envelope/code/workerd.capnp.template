@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "proxy", worker = .proxyWorker),
+    (name = "upstream", external = (
+      address = "127.0.0.1:__UPSTREAM_PORT__",
+      http = ()
+    )),
+  ],
+  sockets = [
+    (name = "http", address = "127.0.0.1:__WORKERD_PORT__", http = (), service = "proxy"),
+  ],
+);
+
+const proxyWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker.js", esModule = embed "worker.js"),
+    (name = "base-worker.js", esModule = embed "../../workerd-duplex-streaming/code/worker.js"),
+    (name = "policy.js", esModule = embed "../../workerd-duplex-streaming/code/policy.js"),
+  ],
+  compatibilityDate = "2026-08-31",
+  bindings = [
+    (name = "UPSTREAM", service = "upstream"),
+    (name = "CLIENT_AUTH", text = "Bearer client-only"),
+    (name = "UPSTREAM_AUTH", text = "Bearer upstream-only"),
+    (name = "MAX_POLICY_PREFIX", text = "65536"),
+    (name = "REQUEST_STREAM_MODE", text = "tee"),
+  ],
+);
