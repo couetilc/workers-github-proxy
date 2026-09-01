@@ -19,7 +19,10 @@ export default {
   },
 
   // .env keys the preflight requires beyond GH_TOKEN + agent credentials.
-  requiredEnv: [],
+  requiredEnv: [
+    'CLOUDFLARE_ACCOUNT_ID',
+    'CLOUDFLARE_API_TOKEN',
+  ],
 
   // Extra named docker volumes mounted for cross-container caching. The npm
   // cache is always mounted; add e.g. 'uv' for Python projects.
