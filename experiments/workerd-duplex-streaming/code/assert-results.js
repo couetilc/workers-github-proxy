@@ -7,8 +7,9 @@ if (!statsPath || !auditPath || !workerdLogPath) {
 }
 
 const MiB = 1024 * 1024;
-const memoryBudget = Number(process.env.MEMORY_BUDGET_MIB || 64) * MiB;
-const plateauTolerance = Number(process.env.MEMORY_PLATEAU_TOLERANCE_MIB || 16) * MiB;
+const memoryBudget = Number(process.env.MEMORY_BUDGET_MIB || 8) * MiB;
+const plateauTolerance = Number(process.env.MEMORY_PLATEAU_TOLERANCE_MIB || 2) * MiB;
+const requestStreamMode = process.env.REQUEST_STREAM_MODE || 'tee';
 const expectedSizes = (process.env.SIZES_MIB || '8 32 96').trim().split(/\s+/).map(Number)
   .sort((left, right) => left - right);
 
@@ -25,6 +26,10 @@ function fail(message) {
 const stats = records(statsPath);
 const audits = records(auditPath);
 const log = fs.readFileSync(workerdLogPath, 'utf8');
+const policyEvents = log.split('\n')
+  .filter((line) => line.startsWith('EXPERIMENT '))
+  .map((line) => JSON.parse(line.slice('EXPERIMENT '.length)))
+  .filter(({ event }) => event === 'policy-allowed' || event === 'policy-rejected');
 
 console.log('direction  input MiB  wire MiB  baseline MiB  RSS delta MiB  samples');
 for (const record of stats) {
@@ -77,6 +82,12 @@ if (audits.length === 0 || audits.some(({ accepted }) => !accepted)) {
 }
 if (audits.some(({ clientCredentialLeaked }) => clientCredentialLeaked)) {
   fail('client credential leaked to upstream');
+}
+if (policyEvents.some(({ streamMode }) => streamMode !== requestStreamMode)) {
+  fail(`Worker policy did not consistently use ${requestStreamMode} request streaming`);
+}
+if (policyEvents.some(({ heldBytes }) => heldBytes > 128 * 1024)) {
+  fail('Worker policy retained more than its prefix plus one expected transport chunk');
 }
 if (!log.includes('"event":"policy-rejected"') ||
     !log.includes('"rejectedRef":"refs/heads/protected"')) {

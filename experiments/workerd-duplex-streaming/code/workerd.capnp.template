@@ -24,5 +24,6 @@ const proxyWorker :Workerd.Worker = (
     (name = "CLIENT_AUTH", text = "Bearer client-only"),
     (name = "UPSTREAM_AUTH", text = "Bearer upstream-only"),
     (name = "MAX_POLICY_PREFIX", text = "65536"),
+    (name = "REQUEST_STREAM_MODE", text = "__REQUEST_STREAM_MODE__"),
   ],
 );

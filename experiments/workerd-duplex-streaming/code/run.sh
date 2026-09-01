@@ -6,6 +6,7 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/git-workerd-streaming.XXXXXX")
 UPSTREAM_PORT=${UPSTREAM_PORT:-$((22000 + $$ % 6000))}
 PROXY_PORT=${PROXY_PORT:-$((UPSTREAM_PORT + 1))}
 SIZES_MIB=${SIZES_MIB:-"8 32 96"}
+REQUEST_STREAM_MODE=${REQUEST_STREAM_MODE:-tee}
 CLIENT_AUTH='Bearer client-only'
 UPSTREAM_AUTH='Bearer upstream-only'
 PIDS=()
@@ -98,6 +99,10 @@ for command in git node npm dd; do
   command -v "$command" >/dev/null || { printf 'required command missing: %s\n' "$command" >&2; exit 1; }
 done
 [[ -r /proc/self/status ]] || { printf 'this RSS harness requires Linux /proc\n' >&2; exit 1; }
+[[ $REQUEST_STREAM_MODE == tee || $REQUEST_STREAM_MODE == reconstruct ]] || {
+  printf 'REQUEST_STREAM_MODE must be tee or reconstruct\n' >&2
+  exit 1
+}
 
 if [[ ! -x $SCRIPT_DIR/node_modules/.bin/workerd ]]; then
   heading 'SETUP: install the pinned workerd binary'
@@ -118,9 +123,10 @@ node --test "$SCRIPT_DIR/policy.test.js"
 GENERATED_CONFIG=$(mktemp "$SCRIPT_DIR/workerd.generated.XXXXXX.capnp")
 sed -e "s|__UPSTREAM_PORT__|$UPSTREAM_PORT|g" \
   -e "s|__PROXY_PORT__|$PROXY_PORT|g" \
+  -e "s|__REQUEST_STREAM_MODE__|$REQUEST_STREAM_MODE|g" \
   "$SCRIPT_DIR/workerd.capnp.template" >"$GENERATED_CONFIG"
 
-heading "SETUP: streaming git-http-backend upstream on port $UPSTREAM_PORT"
+heading "SETUP: workerd request mode=$REQUEST_STREAM_MODE; git upstream port $UPSTREAM_PORT"
 PORT=$UPSTREAM_PORT GIT_PROJECT_ROOT="$BARE_ROOT" \
   CLIENT_AUTH="$CLIENT_AUTH" UPSTREAM_AUTH="$UPSTREAM_AUTH" AUDIT_FILE="$AUDIT_FILE" \
   node "$SCRIPT_DIR/git-upstream.cjs" >"$WORK/logs/upstream.log" 2>&1 &
@@ -215,7 +221,8 @@ GIT_TERMINAL_PROMPT=0 git_with_auth ls-remote "$protected_remote" >/dev/null
 stop_workerd
 
 heading 'RESULTS: enforce workerd memory, auth, and policy budgets'
-SIZES_MIB="$SIZES_MIB" node "$SCRIPT_DIR/assert-results.js" \
+SIZES_MIB="$SIZES_MIB" REQUEST_STREAM_MODE="$REQUEST_STREAM_MODE" \
+  node "$SCRIPT_DIR/assert-results.js" \
   "$STATS_FILE" "$AUDIT_FILE" "$WORK/workerd.log"
 
 heading 'RAW WORKERD RSS MEASUREMENTS'
