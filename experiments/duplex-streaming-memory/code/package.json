@@ -1,0 +1,14 @@
+{
+  "name": "duplex-streaming-memory",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment: bounded-memory smart-HTTP proxy streaming Git packs in both directions",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test policy.test.js",
+    "reproduce": "./run.sh",
+    "proxy": "node streaming-proxy.js",
+    "upstream": "node streaming-upstream.js"
+  },
+  "license": "MIT"
+}
