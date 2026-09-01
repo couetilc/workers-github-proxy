@@ -82,3 +82,35 @@ the report to be wrapped in sideband channel 1. Git failed the push but printed
 success and failure reports now use the same outer channel-1 packet and flush as
 Gitea. The harness additionally requires every intended partial-write failure
 to display `replication incomplete; reconciliation <id>` in Git's stderr.
+
+## 2026-09-01 — Complete default-size run
+
+The final sideband-correct run passed all gates with Git 2.39.5, Gitea 1.27.3,
+and workerd 2026-08-31. It recorded 85 gateway requests, five final partial
+writes, six divergent-advertisement observations, and five successful
+compensating recoveries. Each intended partial write produced a normal Git
+remote-rejection message whose reconciliation UUID matched its fsync-backed
+journal row.
+
+Happy initial, incremental, tag, branch, deletion, clone, and fetch operations
+kept refs and reachable objects equal. The final repositories passed strict
+fsck and contained the same 31 reachable objects.
+
+The mid-pack fault disconnected B after 1,049,415 bytes. A consumed all
+8,391,645 bytes, returned a successful receive-pack report, and held the new
+OID; the client nevertheless received a replication failure. The fan-out event
+recorded one canceled branch and a 4 KiB maximum source chunk. Retrying from B's
+advertisement made B commit, made already-current A reject the stale old OID,
+and passed final-state convergence.
+
+The slow 8 MiB body sent 8,391,670 identical bytes to each replica. A completed
+in 8.14 seconds, B in 17.03 seconds, and the client in 17.26 seconds. Its
+workerd RSS delta was 4.92 MiB. The 32 MiB body sent 33,565,125 identical bytes;
+A completed in 54.51 seconds, B in 64.12 seconds, and the client in 64.85
+seconds. Its RSS delta was 2.14 MiB. Both distributor events reported a 4 KiB
+maximum source chunk.
+
+The hypothesis held with its intended warning. Streaming and round-robin reads
+work for this slice, but atomic dual writes do not emerge from duplication.
+Correct aggregation requires direct final-state verification, honest Git-layer
+failure, durable split-state recording, and an explicit recovery policy.
