@@ -1,0 +1,16 @@
+{
+  "name": "authoritative-primary-outage-replay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment: Artifacts authoritative primary with GitHub outage replay",
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types --config wrangler.jsonc",
+    "check": "wrangler types --config wrangler.jsonc --check",
+    "dev": "wrangler dev --config wrangler.jsonc"
+  },
+  "devDependencies": {
+    "wrangler": "4.128.0"
+  },
+  "license": "MIT"
+}
