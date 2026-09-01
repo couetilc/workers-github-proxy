@@ -1,0 +1,15 @@
+{
+  "name": "workerd-duplex-streaming",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment: measure bounded Git streaming inside the workerd runtime",
+  "type": "module",
+  "scripts": {
+    "test": "node --test policy.test.js",
+    "workerd": "workerd serve workerd.capnp"
+  },
+  "devDependencies": {
+    "workerd": "1.20260831.1"
+  },
+  "license": "MIT"
+}
