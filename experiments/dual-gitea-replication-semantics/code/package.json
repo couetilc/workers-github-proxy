@@ -1,0 +1,14 @@
+{
+  "name": "dual-gitea-replication-semantics",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment: dual-write Git smart HTTP and partial-write recovery against two Giteas",
+  "type": "module",
+  "scripts": {
+    "test": "node --test replication-core.test.js ../../workerd-duplex-streaming/code/policy.test.js"
+  },
+  "devDependencies": {
+    "workerd": "1.20260831.1"
+  },
+  "license": "MIT"
+}
