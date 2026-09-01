@@ -18,6 +18,7 @@ CANCEL_CONCURRENCY=${CANCEL_CONCURRENCY:-8}
 RATE_MIB_PER_SECOND=${RATE_MIB_PER_SECOND:-4}
 SETTLE_SECONDS=${SETTLE_SECONDS:-1}
 CANCEL_AFTER_MIB=${CANCEL_AFTER_MIB:-2}
+PHASES=${PHASES:-"concurrency size longevity cancel"}
 CLIENT_AUTH='Bearer client-only'
 UPSTREAM_AUTH='Bearer upstream-only'
 WORKERD_PID=''
@@ -43,6 +44,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 heading() { printf '\n########## %s ##########\n' "$1"; }
+
+phase_enabled() {
+  [[ " $PHASES " == *" $1 "* ]]
+}
 
 wait_port() {
   local host=$1 port=$2
@@ -292,50 +297,61 @@ PORT=$SHAPER_PORT TARGET_PORT=$WORKERD_PORT SHAPER_AUDIT_FILE="$SHAPER_AUDIT_FIL
 SHAPER_PID=$!
 wait_port 127.0.0.1 "$SHAPER_PORT"
 
-for size_mib in $CURVE_SIZE_MIB $SIZES_MIB $LONGEVITY_SIZE_MIB $CANCEL_SIZE_MIB; do
-  ensure_source "$size_mib"
-done
+if phase_enabled concurrency; then ensure_source "$CURVE_SIZE_MIB"; fi
+if phase_enabled size; then
+  for size_mib in $SIZES_MIB; do ensure_source "$size_mib"; done
+fi
+if phase_enabled longevity; then ensure_source "$LONGEVITY_SIZE_MIB"; fi
+if phase_enabled cancel; then ensure_source "$CANCEL_SIZE_MIB"; fi
 
-heading "CONCURRENCY CURVE: $CURVE_SIZE_MIB MiB per stream"
-for workload in push clone; do
-  for concurrency in $CONCURRENCIES; do
-    case_name="concurrency-$workload-c$concurrency-s$CURVE_SIZE_MIB"
-    heading "$case_name"
-    run_case concurrency "$case_name" "$workload" "$concurrency" \
-      "$CURVE_SIZE_MIB" 0 1
+if phase_enabled concurrency; then
+  heading "CONCURRENCY CURVE: $CURVE_SIZE_MIB MiB per stream"
+  for workload in push clone; do
+    for concurrency in $CONCURRENCIES; do
+      case_name="concurrency-$workload-c$concurrency-s$CURVE_SIZE_MIB"
+      heading "$case_name"
+      run_case concurrency "$case_name" "$workload" "$concurrency" \
+        "$CURVE_SIZE_MIB" 0 1
+    done
   done
-done
-for concurrency in $CONCURRENCIES; do
-  (( concurrency < 2 )) && continue
-  case_name="concurrency-mixed-c$concurrency-s$CURVE_SIZE_MIB"
-  heading "$case_name"
-  run_case concurrency "$case_name" mixed "$concurrency" "$CURVE_SIZE_MIB" 0 1
-done
+  for concurrency in $CONCURRENCIES; do
+    (( concurrency < 2 )) && continue
+    case_name="concurrency-mixed-c$concurrency-s$CURVE_SIZE_MIB"
+    heading "$case_name"
+    run_case concurrency "$case_name" mixed "$concurrency" "$CURVE_SIZE_MIB" 0 1
+  done
+fi
 
-heading "PACK-SIZE CURVE: concurrency $SIZE_CONCURRENCY"
-for size_mib in $SIZES_MIB; do
-  case_name="size-mixed-c$SIZE_CONCURRENCY-s$size_mib"
-  heading "$case_name"
-  run_case size "$case_name" mixed "$SIZE_CONCURRENCY" "$size_mib" 0 1
-done
+if phase_enabled size; then
+  heading "PACK-SIZE CURVE: concurrency $SIZE_CONCURRENCY"
+  for size_mib in $SIZES_MIB; do
+    case_name="size-mixed-c$SIZE_CONCURRENCY-s$size_mib"
+    heading "$case_name"
+    run_case size "$case_name" mixed "$SIZE_CONCURRENCY" "$size_mib" 0 1
+  done
+fi
 
-heading "LONGEVITY: $WAVES waves in one warmed workerd process"
-start_workerd
-for wave in $(seq 1 "$WAVES"); do
-  case_name="longevity-mixed-w$wave-c$LONGEVITY_CONCURRENCY-s$LONGEVITY_SIZE_MIB"
-  heading "$case_name"
-  run_case longevity "$case_name" mixed "$LONGEVITY_CONCURRENCY" \
-    "$LONGEVITY_SIZE_MIB" "$wave" 0
-done
-stop_workerd
+if phase_enabled longevity; then
+  heading "LONGEVITY: $WAVES waves in one warmed workerd process"
+  start_workerd
+  for wave in $(seq 1 "$WAVES"); do
+    case_name="longevity-mixed-w$wave-c$LONGEVITY_CONCURRENCY-s$LONGEVITY_SIZE_MIB"
+    heading "$case_name"
+    run_case longevity "$case_name" mixed "$LONGEVITY_CONCURRENCY" \
+      "$LONGEVITY_SIZE_MIB" "$wave" 0
+  done
+  stop_workerd
+fi
 
-heading 'CANCELLATION: one slow clone aborts while siblings complete'
-case_name="cancel-mixed-c$CANCEL_CONCURRENCY-s$CANCEL_SIZE_MIB"
-run_case cancel "$case_name" cancel "$CANCEL_CONCURRENCY" "$CANCEL_SIZE_MIB" 0 1
+if phase_enabled cancel; then
+  heading 'CANCELLATION: one slow clone aborts while siblings complete'
+  case_name="cancel-mixed-c$CANCEL_CONCURRENCY-s$CANCEL_SIZE_MIB"
+  run_case cancel "$case_name" cancel "$CANCEL_CONCURRENCY" "$CANCEL_SIZE_MIB" 0 1
+fi
 
 heading 'RESULTS: assert overlap, memory envelope, longevity, and cancellation'
 CONCURRENCIES="$CONCURRENCIES" SIZES_MIB="$SIZES_MIB" WAVES="$WAVES" \
-  SIZE_CONCURRENCY="$SIZE_CONCURRENCY" \
+  SIZE_CONCURRENCY="$SIZE_CONCURRENCY" PHASES="$PHASES" \
   node "$SCRIPT_DIR/assert-results.js" "$STATS_FILE" "$AUDIT_FILE" \
   "$SHAPER_AUDIT_FILE" "$WORK/workerd.log"
 

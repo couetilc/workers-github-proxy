@@ -17,6 +17,8 @@ const maxPerStreamMiB = Number(process.env.MAX_RSS_PER_STREAM_MIB || 4);
 const fixedAllowanceMiB = Number(process.env.FIXED_RSS_ALLOWANCE_MIB || 12);
 const sizeToleranceMiB = Number(process.env.SIZE_PLATEAU_TOLERANCE_MIB || 12);
 const floorToleranceMiB = Number(process.env.FLOOR_DRIFT_TOLERANCE_MIB || 12);
+const phases = new Set((process.env.PHASES || 'concurrency size longevity cancel')
+  .trim().split(/\s+/));
 
 function records(file) {
   const contents = fs.readFileSync(file, 'utf8').trim();
@@ -86,20 +88,22 @@ for (const record of stats) {
   }
 }
 
-for (const workload of ['push', 'clone', 'mixed']) {
-  const actual = stats.filter((record) => record.phase === 'concurrency' &&
-    record.workload === workload).map(({ concurrency }) => concurrency);
-  const expected = workload === 'mixed' ? expectedMixedConcurrencies : expectedConcurrencies;
-  if (actual.join(',') !== expected.join(',')) {
-    fail(`${workload} concurrency points were ${actual.join(',')}; expected ${expected.join(',')}`);
+if (phases.has('concurrency')) {
+  for (const workload of ['push', 'clone', 'mixed']) {
+    const actual = stats.filter((record) => record.phase === 'concurrency' &&
+      record.workload === workload).map(({ concurrency }) => concurrency);
+    const expected = workload === 'mixed' ? expectedMixedConcurrencies : expectedConcurrencies;
+    if (actual.join(',') !== expected.join(',')) {
+      fail(`${workload} concurrency points were ${actual.join(',')}; expected ${expected.join(',')}`);
+    }
   }
 }
 
 const sizeStats = stats.filter(({ phase }) => phase === 'size');
-if (sizeStats.length !== expectedSizes.length ||
-    sizeStats.map(({ sizeMiB }) => sizeMiB).join(',') !== expectedSizes.join(',')) {
+if (phases.has('size') && (sizeStats.length !== expectedSizes.length ||
+    sizeStats.map(({ sizeMiB }) => sizeMiB).join(',') !== expectedSizes.join(','))) {
   fail(`size points did not match ${expectedSizes.join(',')}`);
-} else {
+} else if (phases.has('size')) {
   const deltas = sizeStats.map(({ rssDeltaBytes }) => rssDeltaBytes);
   if (Math.max(...deltas) - Math.min(...deltas) > sizeToleranceMiB * MiB) {
     fail(`fixed-concurrency pack sizes varied by more than ${sizeToleranceMiB} MiB RSS`);
@@ -110,9 +114,9 @@ if (sizeStats.length !== expectedSizes.length ||
 }
 
 const waveStats = stats.filter(({ phase }) => phase === 'longevity');
-if (waveStats.length !== expectedWaves) {
+if (phases.has('longevity') && waveStats.length !== expectedWaves) {
   fail(`expected ${expectedWaves} longevity waves, got ${waveStats.length}`);
-} else {
+} else if (phases.has('longevity')) {
   const window = Math.min(3, Math.floor(waveStats.length / 2));
   const earlyFloor = Math.max(...waveStats.slice(0, window).map(({ finalRssBytes }) => finalRssBytes));
   const lateFloor = Math.max(...waveStats.slice(-window).map(({ finalRssBytes }) => finalRssBytes));
@@ -128,9 +132,13 @@ if (waveStats.length !== expectedWaves) {
 }
 
 const cancelStats = stats.filter(({ phase }) => phase === 'cancel');
-if (cancelStats.length !== 1) fail(`expected one cancellation case, got ${cancelStats.length}`);
+if (phases.has('cancel') && cancelStats.length !== 1) {
+  fail(`expected one cancellation case, got ${cancelStats.length}`);
+}
 const injectedAborts = shaperAudits.filter(({ injectedAbort }) => injectedAbort);
-if (injectedAborts.length !== 1) fail(`expected one injected downstream abort, got ${injectedAborts.length}`);
+if (phases.has('cancel') && injectedAborts.length !== 1) {
+  fail(`expected one injected downstream abort, got ${injectedAborts.length}`);
+}
 
 if (requestAudits.length === 0 || requestAudits.some(({ accepted }) => !accepted)) {
   fail('upstream saw a request without the replacement credential');
@@ -144,6 +152,11 @@ if (policyEvents.some(({ heldBytes }) => heldBytes > 128 * 1024)) {
 
 if (!process.exitCode) {
   console.log(`PASS: ${stats.length} cases completed with real overlapping Git packs.`);
-  console.log('PASS: memory stayed within the concurrency envelope and the longevity floor stayed bounded.');
-  console.log('PASS: cancellation propagated while sibling streams and the warmed Worker remained healthy.');
+  if (phases.has('concurrency') || phases.has('size') || phases.has('longevity')) {
+    console.log('PASS: measured memory stayed within the configured envelope.');
+  }
+  if (phases.has('longevity')) console.log('PASS: the warmed-process RSS floor stayed bounded.');
+  if (phases.has('cancel')) {
+    console.log('PASS: cancellation propagated while sibling streams and the Worker remained healthy.');
+  }
 }
