@@ -9,8 +9,17 @@ as we follow the path of experiments. Our goal is understanding, then wisdom.
 
 ## We must establish
 
-- whether a git remote proxy can successfully terminate TLS, then re-encrypt
-and pass the request along to the proxied service.
+- whether a git remote proxy can stream **both** directions through a fixed, small
+memory budget: a push (the unbounded packfile rides in the **request**) and a
+clone/fetch (the unbounded packfile rides in the **response**). The domain-swap
+and TLS experiments both proxied by *buffering* the whole body to inspect it;
+streaming works the same way in either direction — forward each chunk as it
+arrives, keep only a bounded window — so being on the byte path never means
+holding the pack. Establish that proxy memory stays flat as the pack grows on a
+push *and* on a clone, and that header-level auth plus front-of-stream ref policy
+still hold without buffering. This closes the read-path gap the roadmap leaves
+unstated (streaming is required only for the request direction; Phase 3 benchmarks
+measure only the inbound request ceiling).
 
 ## Workspace
 
