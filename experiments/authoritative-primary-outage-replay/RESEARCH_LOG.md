@@ -32,3 +32,29 @@ opaque: the harness checks only an `art_v<version>_` prefix, a non-empty secret,
 and numeric expiry, while never logging the value. A reuse mode mints a new
 short-lived token for this already-created repository so the gate can continue
 without creating another repository.
+
+## 2026-09-01 — First gate passed and GitHub creation blocked
+
+Using a newly minted one-hour token, Git smart HTTP pushed the initial commit
+to Artifacts in 530 ms. A fresh clone completed in 528 ms, resolved the same
+OID (`e6c9a3881e361e201369319451d00c46c6bdfd8e`), matched file content, and
+passed `git fsck --strict`.
+
+The next harness revision proxies Git through the local Worker. A live
+`ls-remote` through that path completed both `info/refs` and `git-upload-pack`
+against the real Artifacts repository, confirming that binding-minted tokens
+and the streaming pass-through route interoperate.
+
+The full harness now covers seven outage-buffered updates, 503 sync failures,
+fresh primary clones, coalesced GitHub replay, exact ref/reachable-object
+comparison, and an unrelated sibling GitHub OID classified as `needs_review`.
+It refuses to run against a non-empty GitHub repository.
+
+Creating the required disposable private GitHub repository failed before any
+repository was created: GitHub returned `Resource not accessible by personal
+access token (createRepository)`. The current fine-grained `GH_TOKEN` can read
+the project repository but cannot create repositories. Reusing this project's
+`main` or adding experiment refs would broaden the experiment's impact and
+violate the dedicated-target safety guard, so the live replay run is paused
+until an empty test repository is supplied or the token gains repository
+creation authority.

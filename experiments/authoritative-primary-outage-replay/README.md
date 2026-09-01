@@ -10,7 +10,7 @@ coalesce repeated updates safely when GitHub still holds the recorded old OID,
 while an unrelated GitHub OID must stop automatic replay as `needs_review`.
 
 **Status.** In progress. The real-service first gate passed; outage/replay and
-conflict cases remain.
+conflict cases are implemented but await a dedicated empty GitHub repository.
 
 **Short answer so far.** Yes for the primary-acceptance gate. A repository
 created through the remote Workers binding accepted a real Git push, served the
@@ -111,6 +111,7 @@ main outage/recovery hypothesis remains open.
 - The first gate validates the Artifacts binding and Git protocol, not outage
   replay or deployed Worker limits.
 - The complete run still needs a disposable GitHub upstream and a faultable
-  synchronization path.
+  synchronization path. The fault path is implemented, but the current
+  fine-grained `GH_TOKEN` cannot create the required private repository.
 - Local Wrangler execution does not establish deployed Worker memory or edge
   request-body limits; those must be measured in a deployed acceptance run.
