@@ -1,0 +1,15 @@
+{
+  "name": "stream-both-directions",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experiment: a git remote proxy that streams BOTH directions (push pack in the request, clone pack in the response) through a fixed, small memory budget, while enforcing header auth and front-of-stream ref policy without buffering the pack. Node built-ins + openssl only.",
+  "type": "commonjs",
+  "scripts": {
+    "reproduce": "./run.sh",
+    "certs": "./gen-certs.sh ./_work/certs",
+    "upstream": "node upstream-server.js",
+    "proxy": "node streaming-proxy.js",
+    "proxy:buffering": "node buffering-proxy.js"
+  },
+  "license": "MIT"
+}
