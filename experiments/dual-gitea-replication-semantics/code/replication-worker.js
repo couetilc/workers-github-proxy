@@ -233,6 +233,28 @@ async function actionOutcome(binding, request, body, upstreamAuth, commands) {
 
 async function handleReceivePack(request, env) {
   const prelude = await readReceivePackPrelude(request.body, Number(env.MAX_COMMAND_PREFIX));
+  // Git sends an empty `0000` receive-pack probe before large chunked RPCs so
+  // it can discover HTTP/auth failures before producing the pack. It is not a
+  // ref transaction and gives a coupled fan-out no commands to verify. Answer
+  // it through A; the following command-bearing RPC is the replicated push.
+  if (prelude.commands.length === 0) {
+    const probe = await bufferedFetch(
+      env.REPLICA_A,
+      request,
+      prelude.body,
+      env.UPSTREAM_AUTH,
+      1024 * 1024,
+    );
+    if (probe.error) throw new Error(`receive-pack probe failed: ${probe.error}`);
+    log({
+      event: 'receive-pack-probe',
+      experimentCase: experimentCase(request),
+      heldBytes: prelude.heldBytes,
+      replica: 'A',
+      status: probe.status,
+    });
+    return responseFromBuffered(probe, { 'x-replication-probe-replica': 'A' });
+  }
   const fanout = boundedFanout(prelude.body, 2);
   const [a, b] = await Promise.all([
     actionOutcome(env.REPLICA_A, request, fanout.streams[0], env.UPSTREAM_AUTH, prelude.commands),

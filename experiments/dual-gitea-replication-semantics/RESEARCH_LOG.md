@@ -30,3 +30,18 @@ Faults are injected between workerd and replica B. Verification bypasses those
 gateways so that a failed write transport cannot hide the actual final state.
 The reconciliation sink is a separate local service that appends and fsyncs one
 JSON record at a time; workerd itself has no filesystem durability contract.
+
+## 2026-09-01 — First integration run: large-push probe deadlock
+
+The happy path and the HTTP 401, HTTP 404, Git-layer rejection, and their
+recovery pushes completed. The first pack-sized disconnect case stalled before
+either replica received the pack. Its only upstream audit was a four-byte
+`0000` receive-pack POST to A.
+
+Git emits this empty receive-pack probe before a large chunked request so it can
+surface HTTP/auth errors before spending the work to stream the pack. The
+Worker had treated the command-free probe as a two-replica transaction, but
+there is no requested final state to verify and the coupled distributor waited
+for an unnecessary second consumer. The fix routes command-free probes through
+A only and reserves dual-write aggregation for the following command-bearing
+RPC. A probe cannot mutate refs, so this does not weaken the replication claim.
