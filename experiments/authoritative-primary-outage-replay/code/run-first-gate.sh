@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/authoritative-primary-gate.XXXXXX")
 PORT=${PORT:-$((26000 + $$ % 3000))}
 REPO_NAME=${ARTIFACTS_REPO:-"outage-replay-$(date -u +%Y%m%d-%H%M%S)-$$"}
+NAMESPACE='workers-github-proxy-experiments'
 WRANGLER_PID=''
 
 cleanup() {
@@ -61,7 +62,7 @@ for _ in $(seq 1 240); do
     break
   fi
   kill -0 "$WRANGLER_PID" 2>/dev/null || {
-    sed -E 's/art_v1_[[:xdigit:]]{40}(\?expires=[[:digit:]]+)?/[redacted-artifacts-token]/g' \
+    sed -E 's/art_v[[:digit:]]+_[^"[:space:]]+/[redacted-artifacts-token]/g' \
       "$RUN_DIR/wrangler.log" >&2
     exit 1
   }
@@ -73,24 +74,39 @@ curl --silent --fail --output /dev/null "http://127.0.0.1:$PORT/health" || {
 }
 
 heading 'CREATE: repository through env.ARTIFACTS'
-curl --silent --show-error --fail-with-body \
-  --header 'Content-Type: application/json' \
-  --data "{\"name\":\"$REPO_NAME\"}" \
-  --output "$RUN_DIR/create.json" \
-  "http://127.0.0.1:$PORT/repos"
-chmod 600 "$RUN_DIR/create.json"
+if [[ ${REUSE_EXISTING:-0} == 1 ]]; then
+  curl --silent --show-error --fail-with-body \
+    --header 'Content-Type: application/json' \
+    --data '{"scope":"write","ttl":3600}' \
+    --output "$RUN_DIR/token.json" \
+    "http://127.0.0.1:$PORT/repos/$REPO_NAME/tokens"
+  chmod 600 "$RUN_DIR/token.json"
+  REMOTE="https://$CLOUDFLARE_ACCOUNT_ID.artifacts.cloudflare.net/git/$NAMESPACE/$REPO_NAME.git"
+  TOKEN=$(jq -er '.token' "$RUN_DIR/token.json")
+  DEFAULT_BRANCH=main
+  printf 'reused repository: %s (default branch: %s)\n' "$REPO_NAME" "$DEFAULT_BRANCH"
+else
+  curl --silent --show-error --fail-with-body \
+    --header 'Content-Type: application/json' \
+    --data "{\"name\":\"$REPO_NAME\"}" \
+    --output "$RUN_DIR/create.json" \
+    "http://127.0.0.1:$PORT/repos"
+  chmod 600 "$RUN_DIR/create.json"
 
-REMOTE=$(jq -er '.remote' "$RUN_DIR/create.json")
-TOKEN=$(jq -er '.token' "$RUN_DIR/create.json")
-DEFAULT_BRANCH=$(jq -er '.defaultBranch' "$RUN_DIR/create.json")
+  REMOTE=$(jq -er '.remote' "$RUN_DIR/create.json")
+  TOKEN=$(jq -er '.token' "$RUN_DIR/create.json")
+  DEFAULT_BRANCH=$(jq -er '.defaultBranch' "$RUN_DIR/create.json")
+  printf 'created repository: %s (default branch: %s)\n' "$REPO_NAME" "$DEFAULT_BRANCH"
+fi
 [[ $DEFAULT_BRANCH == main ]]
-[[ $TOKEN =~ ^art_v1_[[:xdigit:]]{40}\?expires=[[:digit:]]+$ ]]
+[[ $TOKEN =~ ^art_v[[:digit:]]+_[^[:space:]?]+\?expires=[[:digit:]]+$ ]]
 [[ $REMOTE == https://*.artifacts.cloudflare.net/git/*/"$REPO_NAME".git ]]
-printf 'created repository: %s (default branch: %s)\n' "$REPO_NAME" "$DEFAULT_BRANCH"
 
 heading 'PUSH: initial commit through Git smart HTTP'
 SOURCE="$RUN_DIR/source"
 git init -q -b main "$SOURCE"
+mkdir -p "$RUN_DIR/no-hooks"
+git -C "$SOURCE" config core.hooksPath "$RUN_DIR/no-hooks"
 git -C "$SOURCE" config user.name 'Artifacts experiment'
 git -C "$SOURCE" config user.email 'artifacts-experiment@localhost'
 printf '# authoritative primary gate\n\nrepository: %s\n' "$REPO_NAME" >"$SOURCE/README.md"

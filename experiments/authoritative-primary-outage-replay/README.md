@@ -9,8 +9,13 @@ Artifacts accepts it, independently of GitHub availability. A later sync can
 coalesce repeated updates safely when GitHub still holds the recorded old OID,
 while an unrelated GitHub OID must stop automatic replay as `needs_review`.
 
-**Status.** In progress. The first gate is to create a real Artifacts repository
-through the Workers binding and prove smart-HTTP push and clone.
+**Status.** In progress. The real-service first gate passed; outage/replay and
+conflict cases remain.
+
+**Short answer so far.** Yes for the primary-acceptance gate. A repository
+created through the remote Workers binding accepted a real Git push, served the
+same commit to a fresh clone, and passed strict object verification. This does
+not yet establish GitHub replay or conflict behavior.
 
 ## Experimental design
 
@@ -66,11 +71,30 @@ authoritative-primary-outage-replay/
 
 ## Results
 
-Pending.
+### Artifacts first gate
+
+One run on 2026-09-01 created
+`workers-github-proxy-experiments/outage-replay-gate-20260901` through the
+remote Workers binding. A follow-up run minted a short-lived token for that
+repository and completed the Git gate:
+
+| Check | Result |
+| --- | --- |
+| Binding create | HTTP 201; repository ready with default branch `main` |
+| Initial smart-HTTP push | Accepted; acknowledgement in 530 ms |
+| Fresh smart-HTTP clone | Completed in 528 ms |
+| Expected/clone OID | `e6c9a3881e361e201369319451d00c46c6bdfd8e` on both |
+| Object integrity/content | `git fsck --strict` and file comparison passed |
+
+The live binding returned an `art_v2_...` repository credential although the
+current Git-protocol documentation describes `art_v1_<40 hex>`. The harness no
+longer couples authentication to an exact beta token representation.
 
 ## Conclusions
 
-Pending.
+The Artifacts beta/API access gate is cleared. The binding supplies a complete
+Git smart-HTTP primary for the tested initial push and clone. The experiment's
+main outage/recovery hypothesis remains open.
 
 ## Limits and follow-up work
 
