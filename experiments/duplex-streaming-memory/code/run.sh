@@ -143,12 +143,20 @@ done
 heading 'POLICY CONTROL: protected ref is rejected before an upstream request opens'
 start_proxy 'policy-control' "$largest_size" "$WORK/logs/proxy-policy-control.log"
 protected_remote="http://127.0.0.1:$PROXY_PORT/repo-$largest_size.git"
+receive_posts_before=$(grep -c "\"method\":\"POST\",\"path\":\"/repo-$largest_size.git/git-receive-pack\"" \
+  "$AUDIT_FILE" || true)
 if GIT_TERMINAL_PROMPT=0 git_with_auth -C "$largest_source" \
     push "$protected_remote" HEAD:refs/heads/protected >"$WORK/logs/protected-push.log" 2>&1; then
   printf 'protected ref unexpectedly passed policy\n' >&2
   exit 1
 fi
 stop_proxy
+receive_posts_after=$(grep -c "\"method\":\"POST\",\"path\":\"/repo-$largest_size.git/git-receive-pack\"" \
+  "$AUDIT_FILE" || true)
+if [[ $receive_posts_after != "$receive_posts_before" ]]; then
+  printf 'protected receive-pack request reached upstream\n' >&2
+  exit 1
+fi
 if git -C "$largest_bare" show-ref --verify --quiet refs/heads/protected; then
   printf 'protected ref reached the upstream repository\n' >&2
   exit 1
@@ -156,8 +164,14 @@ fi
 
 heading 'AUTH CONTROL: missing client credential stops locally; valid credential is replaced'
 start_proxy 'auth-control' 0 "$WORK/logs/proxy-auth-control.log"
+audit_lines_before=$(wc -l <"$AUDIT_FILE")
 if GIT_TERMINAL_PROMPT=0 git ls-remote "$protected_remote" >"$WORK/logs/unauthenticated.log" 2>&1; then
   printf 'unauthenticated discovery unexpectedly succeeded\n' >&2
+  exit 1
+fi
+audit_lines_after=$(wc -l <"$AUDIT_FILE")
+if [[ $audit_lines_after != "$audit_lines_before" ]]; then
+  printf 'unauthenticated request reached upstream\n' >&2
   exit 1
 fi
 GIT_TERMINAL_PROMPT=0 git_with_auth ls-remote "$protected_remote" >/dev/null

@@ -10,9 +10,10 @@ if (!statsPath || !auditPath) {
 
 const MiB = 1024 * 1024;
 const memoryBudget = Number(process.env.MEMORY_BUDGET_MIB || 32) * MiB;
-const growthTolerance = Number(process.env.MEMORY_GROWTH_TOLERANCE_MIB || 12) * MiB;
+const plateauTolerance = Number(process.env.MEMORY_PLATEAU_TOLERANCE_MIB || 8) * MiB;
 const queueBudget = Number(process.env.QUEUE_BUDGET_MIB || 2) * MiB;
-const expectedSizes = (process.env.SIZES_MIB || '8 32 96').trim().split(/\s+/).map(Number);
+const expectedSizes = (process.env.SIZES_MIB || '8 32 96').trim().split(/\s+/).map(Number)
+  .sort((left, right) => left - right);
 
 function records(file) {
   return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
@@ -66,7 +67,7 @@ for (const direction of ['push', 'clone']) {
 
   const firstBody = direction === 'push' ? group[0].requestBytes : group[0].responseBytes;
   const lastBody = direction === 'push' ? group.at(-1).requestBytes : group.at(-1).responseBytes;
-  if (lastBody < firstBody * 4) fail(`${direction}: body grew less than 4x`);
+  if (lastBody < firstBody * 8) fail(`${direction}: body grew less than 8x`);
 
   for (const record of group) {
     if (record.rssDeltaBytes > memoryBudget) {
@@ -81,10 +82,10 @@ for (const direction of ['push', 'clone']) {
     }
   }
 
-  const firstDelta = group[0].rssDeltaBytes;
+  const previousDelta = group.at(-2).rssDeltaBytes;
   const lastDelta = group.at(-1).rssDeltaBytes;
-  if (lastDelta > firstDelta + growthTolerance) {
-    fail(`${direction}: largest body added more than ${growthTolerance / MiB} MiB over smallest-body RSS delta`);
+  if (lastDelta > previousDelta + plateauTolerance) {
+    fail(`${direction}: largest body added more than ${plateauTolerance / MiB} MiB over the prior RSS delta`);
   }
 }
 

@@ -125,7 +125,7 @@ async function writeWithBackpressure(destination, chunk, measurement) {
   if (!writable) await once(destination, 'drain');
 }
 
-function streamResponse(upstreamResponse, clientResponse, measurement, resolve) {
+function streamResponse(upstreamResponse, clientResponse, measurement, resolve, reject) {
   clientResponse.writeHead(
     upstreamResponse.statusCode || 502,
     responseHeaders(upstreamResponse.headers),
@@ -142,9 +142,14 @@ function streamResponse(upstreamResponse, clientResponse, measurement, resolve) 
     if (!writable) upstreamResponse.pause();
   });
   clientResponse.on('drain', () => upstreamResponse.resume());
-  upstreamResponse.on('end', () => clientResponse.end());
-  upstreamResponse.on('error', (error) => clientResponse.destroy(error));
-  clientResponse.on('finish', () => resolve(upstreamResponse.statusCode || 502));
+  upstreamResponse.on('end', () => {
+    clientResponse.end();
+    resolve(upstreamResponse.statusCode || 502);
+  });
+  upstreamResponse.on('error', (error) => {
+    clientResponse.destroy(error);
+    reject(error);
+  });
 }
 
 function openUpstream(clientRequest, clientResponse, measurement) {
@@ -158,7 +163,7 @@ function openUpstream(clientRequest, clientResponse, measurement) {
       path: clientRequest.url,
       headers: proxyHeaders(clientRequest.headers),
     }, (upstreamResponse) => {
-      streamResponse(upstreamResponse, clientResponse, measurement, resolve);
+      streamResponse(upstreamResponse, clientResponse, measurement, resolve, reject);
     });
     upstreamRequest.on('error', reject);
   });
